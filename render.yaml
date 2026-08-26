@@ -1,0 +1,49 @@
+# Render blueprint: API + managed PostgreSQL.
+#
+# Usage: push this repo to GitHub, then in Render choose
+# "New +" -> "Blueprint" and point it at the repo.
+#
+# Before the first deploy, switch prisma/schema.prisma to
+#   provider = "postgresql"
+# so `prisma migrate deploy` targets Postgres.
+
+databases:
+  - name: crypto-advisor-db
+    databaseName: crypto_advisor
+    user: crypto_advisor
+    plan: free
+
+services:
+  - type: web
+    name: crypto-advisor-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install && npm run build && npx prisma migrate deploy
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: crypto-advisor-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      # Set this to your deployed frontend origin (comma-separated for several).
+      - key: CORS_ORIGIN
+        sync: false
+      # Optional integrations - the app degrades gracefully without them.
+      - key: COINGECKO_API_KEY
+        sync: false
+      - key: CRYPTOPANIC_API_TOKEN
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: mistralai/mistral-7b-instruct:free
+      - key: HUGGINGFACE_API_KEY
+        sync: false
