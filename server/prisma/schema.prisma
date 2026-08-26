@@ -1,0 +1,120 @@
+// AI Crypto Advisor - Prisma schema
+//
+// PORTABILITY NOTE
+// ----------------
+// The default provider is `sqlite` so the project runs with zero infrastructure.
+// To move to PostgreSQL (Supabase / Neon / Render / Railway):
+//   1. Change `provider` below to "postgresql".
+//   2. Point DATABASE_URL at the Postgres connection string.
+//   3. Run `npm run db:migrate -w server` (dev) or `npm run db:deploy -w server` (prod).
+// No model changes are required: this schema deliberately avoids SQLite-incompatible
+// features (native enums, scalar lists, Json columns). String-encoded JSON is used for
+// list fields instead, and every value is validated/parsed in the service layer
+// (see src/services/profile.service.ts and src/utils/json.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+  // For Supabase's connection pooler, also set:
+  // directUrl = env("DIRECT_URL")
+}
+
+/// An authenticated end user.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  profile   Profile?
+  feedback  Feedback[]
+  insights  DailyInsight[]
+
+  @@index([createdAt])
+}
+
+/// Preferences captured during onboarding. Drives every dashboard section.
+model Profile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// JSON string array of asset symbols, e.g. ["BTC","ETH","SOL"].
+  assets String
+
+  /// One of: HODLER | DAY_TRADER | NFT_COLLECTOR | DEFI_ENTHUSIAST
+  archetype String
+
+  /// JSON string array of content types, e.g. ["MARKET_NEWS","CHARTS"].
+  contentTypes String
+
+  /// Optional free-text goal the user typed during onboarding.
+  goal String?
+
+  /// Set the first time onboarding is submitted. Null => onboarding incomplete.
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// A thumbs up / thumbs down vote on one dashboard section.
+/// One row per (user, section, item) - re-voting updates the existing row.
+model Feedback {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// One of: PRICES | NEWS | INSIGHT | MEME
+  sectionType String
+
+  /// Stable identity of the exact content that was rated, produced by the
+  /// service that rendered it (e.g. "insight:clx123", "meme:abc987").
+  itemIdentifier String
+
+  /// One of: UP | DOWN
+  vote String
+
+  /// JSON snapshot of what the user actually saw plus the profile that produced
+  /// it. This is what makes the feedback table trainable later (see README ->
+  /// "Bonus: Turning Feedback Into Continuous Learning").
+  contextSnapshot String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, sectionType, itemIdentifier])
+  @@index([userId, createdAt])
+  @@index([sectionType, vote])
+}
+
+/// Cached, dated AI insight so the "daily" insight is stable for a user/day and
+/// so each insight has a durable id that feedback rows can reference.
+model DailyInsight {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// UTC calendar day, formatted YYYY-MM-DD.
+  date String
+
+  content String
+
+  /// Model id that produced the text, or "fallback:template" when every
+  /// provider was unavailable.
+  model String
+
+  /// The exact prompt sent upstream - required for DPO/SFT dataset export.
+  prompt String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, date])
+  @@index([date])
+}
