@@ -19,9 +19,19 @@ services:
     name: crypto-advisor-api
     runtime: node
     plan: free
-    rootDir: server
-    buildCommand: npm install && npm run build:prod && npm run db:deploy
-    startCommand: npm run start
+    # Deploy from the REPO ROOT, not server/. This is an npm-workspaces monorepo:
+    # package-lock.json only exists at the root, so installing from server/ would
+    # resolve dependencies fresh on every deploy (unreproducible) and ignore the
+    # root package.json entirely.
+    rootDir: .
+    #
+    # `--include=dev` is REQUIRED, not optional. NODE_ENV=production (set below)
+    # makes npm omit devDependencies by default, which would strip typescript and
+    # @types/node and fail the build with:
+    #   TS2688: Cannot find type definition file for 'node'
+    # The runtime still gets NODE_ENV=production; only the build needs dev deps.
+    buildCommand: npm ci --include=dev && npm run build:prod -w server && npm run db:deploy -w server
+    startCommand: npm run start -w server
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV

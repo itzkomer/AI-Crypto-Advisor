@@ -389,10 +389,36 @@ Either commit [`render.yaml`](render.yaml) and use **New + → Blueprint**, or c
 
 | Setting | Value |
 | --- | --- |
-| Root directory | `server` |
-| Build command | `npm install && npm run build:prod && npm run db:deploy` |
-| Start command | `npm run start` |
+| Root directory | **`.`** (repo root — *not* `server`) |
+| Build command | `npm ci --include=dev && npm run build:prod -w server && npm run db:deploy -w server` |
+| Start command | `npm run start -w server` |
 | Health check path | `/api/health` |
+| Node version | pinned to 22 via `.node-version` |
+
+> ### ⚠️ Two settings here are load-bearing. Getting either wrong fails the build.
+>
+> **`--include=dev` is mandatory.** This service sets `NODE_ENV=production`, and npm
+> then **omits `devDependencies`** — which is where `typescript` and `@types/node`
+> live. Without the flag the build dies with:
+>
+> ```
+> error TS2688: Cannot find type definition file for 'node'.
+>   Entry point of type library 'node' specified in compilerOptions
+> ```
+>
+> That error is misleading: nothing is wrong with `tsconfig.json`. The types were
+> simply never installed. Verified by clean-room reproduction — `npm ci` with
+> `NODE_ENV=production` installs **zero** `@types` packages. Do not "fix" it by
+> deleting `"types": ["node"]` from `server/tsconfig.json`; that line prevents the
+> client's hoisted `@types/react` from leaking DOM globals into server code.
+>
+> **Root directory must be the repo root.** `package-lock.json` exists only at the
+> root, so building from `server/` resolves dependencies fresh on every deploy
+> (unreproducible) and ignores the root `package.json`. `-w server` scopes the
+> scripts to the API workspace.
+>
+> If `npm ci` ever fails with `EUSAGE`/`ETARGET`, the lockfile is out of sync with a
+> `package.json` — run `npm install` locally and commit the updated lockfile.
 
 Environment variables to set:
 
@@ -437,9 +463,12 @@ Then open the Vercel URL, register, complete onboarding, and confirm all four ca
 
 ### Railway alternative
 
-Root `server`, build `npm install && npm run build && npx prisma migrate deploy`, start `npm run start`, add the Postgres plugin (it injects `DATABASE_URL`), then set `JWT_SECRET` and `CORS_ORIGIN`.
+Root `.`, build `npm ci --include=dev && npm run build:prod -w server && npm run db:deploy -w server`, start `npm run start -w server`. Add the Postgres plugin (it injects `DATABASE_URL`), then set `JWT_SECRET` and `CORS_ORIGIN`. The same `--include=dev` caveat applies.
 
 ### Deployment gotchas
+
+- **`NODE_ENV=production` strips your build tools.** Covered in the warning above — the single most likely thing to break a first deploy of a TypeScript service. Vercel is not affected (it installs devDependencies during builds regardless), so the SPA deploy needs no flag.
+- **Pin the Node version.** `.node-version` (22) keeps the host off whatever major it defaults to this month; `@types/node` is aligned to `^22`.
 
 - **Render free tier cold starts** (~50s after 15 min idle). The first dashboard load may time out; the client's retry + fallback path handles it, but expect a slow first paint.
 - **Free Postgres instances expire** on some plans — check your provider's retention policy before demoing.
