@@ -67,9 +67,11 @@ export const MemeCard = () => {
             <p className="text-xs text-bear">{errorMessage(shuffle.error)}</p>
           ) : null}
 
-          <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-surface-950/60">
+          {/* min-h reserves space so a slow or broken image cannot collapse the
+              card and leave a void when the grid stretches it to match its row. */}
+          <div className="flex min-h-52 items-center justify-center overflow-hidden rounded-xl border border-white/[0.06] bg-surface-950/60">
             {imageFailed ? (
-              <div className="flex h-52 flex-col items-center justify-center gap-2 text-ink-500">
+              <div className="flex flex-col items-center justify-center gap-2 py-8 text-ink-500">
                 <ImageOff className="h-6 w-6" aria-hidden="true" />
                 <p className="text-xs">This image did not load. Try shuffling.</p>
               </div>
@@ -77,7 +79,6 @@ export const MemeCard = () => {
               <img
                 src={data.data.imageUrl}
                 alt={data.data.title}
-                loading="lazy"
                 onError={() => setImageFailed(true)}
                 className="mx-auto max-h-72 w-full object-contain"
               />
