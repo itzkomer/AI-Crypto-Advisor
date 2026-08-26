@@ -19,7 +19,12 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
     "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+
+    "typeRoots": [
+      "./node_modules/@types",
+      "../node_modules/@types"
+    ]
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "prisma/seed.ts"]
