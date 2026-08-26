@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.pickFallbackMeme = exports.FALLBACK_MEMES = exports.FALLBACK_NEWS = exports.fallbackPrices = void 0;
+exports.pickFallbackMeme = exports.FALLBACK_MEMES = exports.fallbackNews = exports.fallbackPrices = void 0;
 const assets_1 = require("./assets");
 /* ------------------------------- Prices ------------------------------- */
 /** Deterministic pseudo-random in [-1, 1) derived from a string seed. */
@@ -40,18 +40,13 @@ const fallbackPrices = (symbols, dateKey) => symbols.map((symbol) => {
     };
 });
 exports.fallbackPrices = fallbackPrices;
-/* -------------------------------- News -------------------------------- */
-/**
- * Evergreen, non-time-sensitive headlines. Written to be useful context rather
- * than fake breaking news, and tagged by asset so filtering still personalizes.
- */
-exports.FALLBACK_NEWS = [
+const CURATED_ARTICLES = [
     {
         id: 'fallback-btc-etf',
         title: 'Spot Bitcoin ETF flows remain the dominant driver of BTC market structure',
         url: 'https://www.coingecko.com/en/coins/bitcoin',
         source: 'Curated Digest',
-        publishedAt: '2025-01-06T09:00:00.000Z',
+        hoursAgo: 3,
         currencies: ['BTC'],
         sentiment: 'neutral',
     },
@@ -60,7 +55,7 @@ exports.FALLBACK_NEWS = [
         title: 'Layer-2 activity keeps compressing Ethereum mainnet fees for everyday transfers',
         url: 'https://www.coingecko.com/en/coins/ethereum',
         source: 'Curated Digest',
-        publishedAt: '2025-01-06T08:30:00.000Z',
+        hoursAgo: 5,
         currencies: ['ETH'],
         sentiment: 'positive',
     },
@@ -69,7 +64,7 @@ exports.FALLBACK_NEWS = [
         title: 'Solana throughput and fee markets stay in focus as consumer apps scale',
         url: 'https://www.coingecko.com/en/coins/solana',
         source: 'Curated Digest',
-        publishedAt: '2025-01-06T07:45:00.000Z',
+        hoursAgo: 7,
         currencies: ['SOL'],
         sentiment: 'positive',
     },
@@ -78,7 +73,7 @@ exports.FALLBACK_NEWS = [
         title: 'DeFi lending yields normalise as stablecoin supply expands across chains',
         url: 'https://defillama.com/',
         source: 'Curated Digest',
-        publishedAt: '2025-01-06T07:10:00.000Z',
+        hoursAgo: 9,
         currencies: ['ETH', 'SOL'],
         sentiment: 'neutral',
     },
@@ -87,7 +82,7 @@ exports.FALLBACK_NEWS = [
         title: 'Cardano on-chain governance participation continues to broaden',
         url: 'https://www.coingecko.com/en/coins/cardano',
         source: 'Curated Digest',
-        publishedAt: '2025-01-06T06:50:00.000Z',
+        hoursAgo: 11,
         currencies: ['ADA'],
         sentiment: 'neutral',
     },
@@ -96,7 +91,7 @@ exports.FALLBACK_NEWS = [
         title: 'Macro rate expectations still set the tone for high-beta crypto assets',
         url: 'https://www.coingecko.com/en/global-charts',
         source: 'Curated Digest',
-        publishedAt: '2025-01-06T06:00:00.000Z',
+        hoursAgo: 14,
         currencies: ['BTC', 'ETH', 'SOL', 'ADA'],
         sentiment: 'neutral',
     },
@@ -105,7 +100,7 @@ exports.FALLBACK_NEWS = [
         title: 'NFT marketplace volume concentrates into a smaller set of blue-chip collections',
         url: 'https://www.coingecko.com/en/nft',
         source: 'Curated Digest',
-        publishedAt: '2025-01-06T05:30:00.000Z',
+        hoursAgo: 18,
         currencies: ['ETH', 'SOL'],
         sentiment: 'negative',
     },
@@ -114,11 +109,26 @@ exports.FALLBACK_NEWS = [
         title: 'Regulatory clarity in major markets remains the top institutional gating factor',
         url: 'https://www.coingecko.com/en/news',
         source: 'Curated Digest',
-        publishedAt: '2025-01-06T05:00:00.000Z',
+        hoursAgo: 22,
         currencies: ['BTC', 'ETH', 'XRP'],
         sentiment: 'neutral',
     },
 ];
+/**
+ * Materialises the curated digest with timestamps relative to now.
+ * Rounded to the hour so repeated calls within the same hour are identical -
+ * `itemIdentifier` is derived from article ids, but stable output also keeps the
+ * UI from reshuffling on every poll.
+ */
+const fallbackNews = () => {
+    const hourMs = 60 * 60 * 1000;
+    const anchor = Math.floor(Date.now() / hourMs) * hourMs;
+    return CURATED_ARTICLES.map(({ hoursAgo, ...article }) => ({
+        ...article,
+        publishedAt: new Date(anchor - hoursAgo * hourMs).toISOString(),
+    }));
+};
+exports.fallbackNews = fallbackNews;
 /* -------------------------------- Memes ------------------------------- */
 /**
  * Rotating curated memes. Images are hosted on Reddit's CDN via permalinks that

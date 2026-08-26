@@ -59,14 +59,24 @@ export const fallbackPrices = (symbols: AssetSymbol[], dateKey: string): CoinPri
 /**
  * Evergreen, non-time-sensitive headlines. Written to be useful context rather
  * than fake breaking news, and tagged by asset so filtering still personalizes.
+ *
+ * `hoursAgo` is relative rather than an absolute date on purpose: hardcoded
+ * timestamps would render as "2y ago" once this project has been sitting for a
+ * while, which reads as broken data. Because these headlines are deliberately
+ * evergreen, anchoring them to "recent" is accurate, not misleading - and the
+ * card is still badged `Fallback` so nobody mistakes them for live wire copy.
  */
-export const FALLBACK_NEWS: NewsArticle[] = [
+interface CuratedArticle extends Omit<NewsArticle, 'publishedAt'> {
+  hoursAgo: number;
+}
+
+const CURATED_ARTICLES: CuratedArticle[] = [
   {
     id: 'fallback-btc-etf',
     title: 'Spot Bitcoin ETF flows remain the dominant driver of BTC market structure',
     url: 'https://www.coingecko.com/en/coins/bitcoin',
     source: 'Curated Digest',
-    publishedAt: '2025-01-06T09:00:00.000Z',
+    hoursAgo: 3,
     currencies: ['BTC'],
     sentiment: 'neutral',
   },
@@ -75,7 +85,7 @@ export const FALLBACK_NEWS: NewsArticle[] = [
     title: 'Layer-2 activity keeps compressing Ethereum mainnet fees for everyday transfers',
     url: 'https://www.coingecko.com/en/coins/ethereum',
     source: 'Curated Digest',
-    publishedAt: '2025-01-06T08:30:00.000Z',
+    hoursAgo: 5,
     currencies: ['ETH'],
     sentiment: 'positive',
   },
@@ -84,7 +94,7 @@ export const FALLBACK_NEWS: NewsArticle[] = [
     title: 'Solana throughput and fee markets stay in focus as consumer apps scale',
     url: 'https://www.coingecko.com/en/coins/solana',
     source: 'Curated Digest',
-    publishedAt: '2025-01-06T07:45:00.000Z',
+    hoursAgo: 7,
     currencies: ['SOL'],
     sentiment: 'positive',
   },
@@ -93,7 +103,7 @@ export const FALLBACK_NEWS: NewsArticle[] = [
     title: 'DeFi lending yields normalise as stablecoin supply expands across chains',
     url: 'https://defillama.com/',
     source: 'Curated Digest',
-    publishedAt: '2025-01-06T07:10:00.000Z',
+    hoursAgo: 9,
     currencies: ['ETH', 'SOL'],
     sentiment: 'neutral',
   },
@@ -102,7 +112,7 @@ export const FALLBACK_NEWS: NewsArticle[] = [
     title: 'Cardano on-chain governance participation continues to broaden',
     url: 'https://www.coingecko.com/en/coins/cardano',
     source: 'Curated Digest',
-    publishedAt: '2025-01-06T06:50:00.000Z',
+    hoursAgo: 11,
     currencies: ['ADA'],
     sentiment: 'neutral',
   },
@@ -111,7 +121,7 @@ export const FALLBACK_NEWS: NewsArticle[] = [
     title: 'Macro rate expectations still set the tone for high-beta crypto assets',
     url: 'https://www.coingecko.com/en/global-charts',
     source: 'Curated Digest',
-    publishedAt: '2025-01-06T06:00:00.000Z',
+    hoursAgo: 14,
     currencies: ['BTC', 'ETH', 'SOL', 'ADA'],
     sentiment: 'neutral',
   },
@@ -120,7 +130,7 @@ export const FALLBACK_NEWS: NewsArticle[] = [
     title: 'NFT marketplace volume concentrates into a smaller set of blue-chip collections',
     url: 'https://www.coingecko.com/en/nft',
     source: 'Curated Digest',
-    publishedAt: '2025-01-06T05:30:00.000Z',
+    hoursAgo: 18,
     currencies: ['ETH', 'SOL'],
     sentiment: 'negative',
   },
@@ -129,11 +139,27 @@ export const FALLBACK_NEWS: NewsArticle[] = [
     title: 'Regulatory clarity in major markets remains the top institutional gating factor',
     url: 'https://www.coingecko.com/en/news',
     source: 'Curated Digest',
-    publishedAt: '2025-01-06T05:00:00.000Z',
+    hoursAgo: 22,
     currencies: ['BTC', 'ETH', 'XRP'],
     sentiment: 'neutral',
   },
 ];
+
+/**
+ * Materialises the curated digest with timestamps relative to now.
+ * Rounded to the hour so repeated calls within the same hour are identical -
+ * `itemIdentifier` is derived from article ids, but stable output also keeps the
+ * UI from reshuffling on every poll.
+ */
+export const fallbackNews = (): NewsArticle[] => {
+  const hourMs = 60 * 60 * 1000;
+  const anchor = Math.floor(Date.now() / hourMs) * hourMs;
+
+  return CURATED_ARTICLES.map(({ hoursAgo, ...article }) => ({
+    ...article,
+    publishedAt: new Date(anchor - hoursAgo * hourMs).toISOString(),
+  }));
+};
 
 /* -------------------------------- Memes ------------------------------- */
 

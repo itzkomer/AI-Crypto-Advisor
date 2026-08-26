@@ -68,7 +68,7 @@ const fetchLiveNews = async (symbols, token) => {
 const curatedNews = (symbols) => {
     const wanted = new Set(symbols);
     const score = (article) => article.currencies.filter((code) => wanted.has(code)).length;
-    return [...fallbacks_1.FALLBACK_NEWS]
+    return (0, fallbacks_1.fallbackNews)()
         .map((article) => ({ article, relevance: score(article) }))
         .sort((a, b) => {
         if (b.relevance !== a.relevance)

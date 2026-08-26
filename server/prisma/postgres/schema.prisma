@@ -1,3 +1,13 @@
+// ============================================================
+// GENERATED FILE - DO NOT EDIT BY HAND.
+//
+// Derived from prisma/schema.prisma by scripts/sync-postgres-schema.mjs.
+// Edit the source schema, then run: npm run schema:sync
+//
+// This is the schema used for PostgreSQL deployments. The models are
+// byte-identical to the SQLite source; only the datasource provider differs.
+// ============================================================
+
 // AI Crypto Advisor - Prisma schema
 //
 // THIS FILE IS THE SINGLE SOURCE OF TRUTH FOR THE DATA MODEL.
@@ -23,7 +33,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
   // For Supabase's connection pooler, also set:
   // directUrl = env("DIRECT_URL")

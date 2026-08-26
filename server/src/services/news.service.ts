@@ -13,7 +13,7 @@ import { logger } from '../lib/logger';
 import { shortHash } from '../utils/hash';
 import { utcDateKey } from '../utils/date';
 import { ASSET_CATALOG } from '../data/assets';
-import { FALLBACK_NEWS } from '../data/fallbacks';
+import { fallbackNews } from '../data/fallbacks';
 import type { AssetSymbol, DataSource, NewsArticle, NewsPayload, NewsSection } from '../types';
 
 const MAX_ARTICLES = 6;
@@ -90,7 +90,7 @@ const curatedNews = (symbols: AssetSymbol[]): NewsArticle[] => {
   const score = (article: NewsArticle): number =>
     article.currencies.filter((code) => wanted.has(code)).length;
 
-  return [...FALLBACK_NEWS]
+  return fallbackNews()
     .map((article) => ({ article, relevance: score(article) }))
     .sort((a, b) => {
       if (b.relevance !== a.relevance) return b.relevance - a.relevance;
