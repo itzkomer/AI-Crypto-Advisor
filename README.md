@@ -1,6 +1,6 @@
 # AI Crypto Advisor
 
-> A personalized crypto dashboard with live prices, tailored news, an AI-generated daily insight, a crypto meme, and per-section thumbs up/down feedback captured for continuous learning.
+> Moveo Coding Task — a personalized crypto dashboard with live prices, tailored news, an AI-generated daily insight, a crypto meme, and per-section thumbs up/down feedback captured for continuous learning.
 
 <p align="left">
   <img alt="React" src="https://img.shields.io/badge/React-18-149ECA?logo=react&logoColor=white">
@@ -25,6 +25,7 @@
 9. [Deployment guide](#9-deployment-guide)
 10. [AI tool interaction log](#10-ai-tool-interaction-log)
 11. [Bonus: turning feedback into continuous learning](#11-bonus-turning-feedback-into-continuous-learning)
+12. [Known limitations & next steps](#12-known-limitations--next-steps)
 
 ---
 
@@ -86,10 +87,14 @@ Every external integration is **best-effort with a labelled fallback**. If CoinG
 ```
 AI Crypto Advisor/
 ├── package.json                  # npm workspaces root + concurrently dev script
+├── SUBMISSION.md                 # 1-page overview (the submission attachment)
 ├── render.yaml                   # Render blueprint (API + Postgres)
 ├── server/
+│   ├── scripts/
+│   │   └── sync-postgres-schema.mjs   # derives the Postgres schema from the SQLite one
 │   ├── prisma/
-│   │   ├── schema.prisma         # User, Profile, Feedback, DailyInsight
+│   │   ├── schema.prisma         # ⭐ source of truth: User, Profile, Feedback, DailyInsight
+│   │   ├── postgres/             # GENERATED: prod schema + committed migrations
 │   │   └── seed.ts               # demo@moveo.dev / Demo1234!
 │   └── src/
 │       ├── index.ts              # HTTP listener + graceful shutdown
@@ -166,9 +171,12 @@ password: Demo1234!
 | `npm run dev` | API + UI concurrently, both with hot reload |
 | `npm run build` | Type-check + build both workspaces |
 | `npm run typecheck` | Strict `tsc --noEmit` across client and server |
-| `npm run db:push` | Push the Prisma schema (no migration files — dev only) |
-| `npm run db:migrate` | Create a real migration (use this for Postgres) |
+| `npm run verify` | **schema drift check + typecheck + build.** The one command to run before pushing |
+| `npm run db:push` | Push the Prisma schema to local SQLite (no migration files — dev only) |
 | `npm run db:seed` | Idempotently upsert the demo user + profile |
+| `npm run schema:sync` | Regenerate `prisma/postgres/schema.prisma` from the SQLite source |
+| `npm run schema:check` | Fail if the generated Postgres schema has drifted |
+| `npm run db:deploy` | Apply Postgres migrations (production) |
 | `npm run db:studio` | Prisma Studio DB browser |
 
 ### Verifying it works without any API keys
@@ -353,26 +361,27 @@ curl -s localhost:4000/api/feedback -X POST -H "Authorization: Bearer $TOKEN" \
 
 Reference topology: **Vercel** (static SPA) + **Render** (API) + **Render Postgres** (or Supabase/Neon).
 
-### Step 1 — switch Prisma to PostgreSQL
+### Step 1 — nothing to do
 
-```prisma
-// server/prisma/schema.prisma
-datasource db {
-  provider = "postgresql"   // was "sqlite"
-  url      = env("DATABASE_URL")
-  // directUrl = env("DIRECT_URL")   // uncomment for Supabase's pooler
-}
+**There is no manual schema edit before deploying.** `server/prisma/schema.prisma` (SQLite) is the single source of truth; the PostgreSQL schema and its migration are generated from it and **already committed**:
+
+```
+server/prisma/schema.prisma                              # source of truth (SQLite, local dev)
+server/prisma/postgres/schema.prisma                     # generated (PostgreSQL, production)
+server/prisma/postgres/migrations/0_init/migration.sql   # generated DDL
+server/prisma/postgres/migrations/migration_lock.toml
 ```
 
-Then generate the initial migration against a Postgres URL:
+Production scripts point at the generated schema:
 
-```bash
-cd server
-DATABASE_URL="postgresql://…" npx prisma migrate dev --name init
-git add prisma/migrations && git commit -m "chore: initial postgres migration"
-```
+| Script | Command |
+| --- | --- |
+| `build:prod` | `schema:check` → `prisma generate --schema=prisma/postgres/schema.prisma` → `tsc` |
+| `db:deploy` | `prisma migrate deploy --schema=prisma/postgres/schema.prisma` |
 
-No model changes are needed — the schema avoids SQLite-only and Postgres-only features on purpose (§6).
+After changing any model, run `npm run schema:sync && npm run schema:migration -w server` and commit both. `npm run verify` — and `build:prod` — **fail if the two schemas have drifted**, so a forgotten sync can't reach production.
+
+No model changes are ever needed between the two engines: the schema avoids SQLite-only and Postgres-only features on purpose (§6).
 
 ### Step 2 — deploy the API to Render
 
@@ -381,7 +390,7 @@ Either commit [`render.yaml`](render.yaml) and use **New + → Blueprint**, or c
 | Setting | Value |
 | --- | --- |
 | Root directory | `server` |
-| Build command | `npm install && npm run build && npx prisma migrate deploy` |
+| Build command | `npm install && npm run build:prod && npm run db:deploy` |
 | Start command | `npm run start` |
 | Health check path | `/api/health` |
 
@@ -491,10 +500,18 @@ The whole codebase was written before Node.js was available in the environment, 
 | Cascade deletes | Deleting a user removed their `Feedback` and `DailyInsight` rows. |
 | Error paths | 422 with per-field details on weak passwords and bad enum values, 409 on duplicate email, 401 on missing/garbage token, 404 on unknown route. |
 | Vite dev proxy | `localhost:5173/api/health` correctly proxied to the API — no CORS in dev, as designed. |
+| **Full UI walkthrough (headless Chrome)** | 13-step Playwright run through the real browser: root → `/login` redirect, register with live password-rule feedback, **new user routed to onboarding**, Continue correctly disabled until an asset is picked, all 3 onboarding steps, dashboard renders all 4 cards out of their loading state, profile chips match the answers, price card shows exactly the 2 chosen assets, 👍 flips `aria-pressed` **and is confirmed present in the DB via the API**, the vote **survives a full page reload**, meme shuffle returns a new image, sign-out redirects, and `/dashboard` is blocked once logged out. **0 console errors, 0 page exceptions, 0 failed requests.** |
+
+**Two real defects were found only by looking at a screenshot**, after every structural assertion had already passed:
+
+1. **Curated news rendered "2y ago".** The fallback digest had hardcoded `2025-01-06` timestamps, so as soon as the calendar moved on it read as stale, broken data. Fixed by making the curated articles carry a relative `hoursAgo` and materialising `publishedAt` against the current hour — accurate, since those headlines are deliberately evergreen.
+2. **The meme card collapsed into a large void.** The image container had no reserved height, so a slow (`loading="lazy"`) or failed image dropped the card's height to nothing while the grid stretched it to match the News card. Fixed with `min-h-52` on the container and dropping lazy-loading for what is a single, near-the-fold hero image.
+
+Neither was reachable by type-checking or DOM assertions — they needed a human (or a model) to actually *look* at the rendered page.
 
 **Two real runtime bugs were caught only by executing it**, not by type-checking — both listed in the table above (`Object.assign(req.query)` and the `tsc -b`/`composite` mismatch). That is the argument for running the thing: strict TypeScript proved the *shapes* were right, and said nothing about Express's prototype getters.
 
-**Still not verified:** the UI has only been checked as far as "Vite serves it and the proxy works" — no browser click-through of the register → onboarding → dashboard flow, and no automated tests (see §12).
+**Still not verified:** no committed automated test suite (the Playwright walkthrough above was run from a scratch directory, not checked in — see §12), and nothing has been deployed to a live host yet.
 
 ---
 
@@ -602,3 +619,30 @@ Three of the four sections aren't generation problems, and treating them as such
 ### Minimum viable next commit
 
 If only one thing ships from this section: log implicit signals (dwell, click-through, regenerate) next to the explicit votes, and turn on Stage 1 few-shot injection. That's a few hundred lines, needs no GPU, and produces the volume Stage 2 requires.
+
+---
+
+## 12. Known limitations & next steps
+
+Honest inventory rather than a feature list.
+
+**Not verified**
+- **No committed test suite.** The API is verified via curl and the UI via a 13-step headless-Chrome walkthrough (§10), but neither is checked into the repo, so nothing guards against regressions. `app.ts` is exported separately from `index.ts` specifically so `supertest` can mount it without binding a port; the Playwright script should be moved into `client/e2e/` and wired to CI. Highest-value unit/integration tests: auth round-trip, feedback upsert idempotency, and `withCache` serving stale data on upstream failure.
+
+**Security**
+- JWT in `localStorage` (§8) — swap for an httpOnly refresh cookie + in-memory access token before real users.
+- No refresh-token rotation, email verification, or password reset.
+- Rate limiting and caching are both in-memory, so both are per-instance.
+
+**Product**
+- Onboarding preferences drive personalization, but `contentTypes` currently only shapes the AI prompt's tone; it should also reorder/hide cards.
+- No pagination on news, no historical charts beyond the 7-day sparkline, no portfolio tracking.
+- `/feedback/export` is scoped to the caller. A real training pipeline needs an admin-gated global export behind a consent flag.
+
+**Ops**
+- No structured request tracing, no metrics endpoint, no error reporting (Sentry).
+- `Feedback` and `DailyInsight` grow unboundedly; needs a retention policy.
+
+---
+
+<p align="center"><sub>Built for the Moveo coding task · market data from CoinGecko &amp; CryptoPanic · insights are AI-generated and not financial advice</sub></p>

@@ -3,9 +3,10 @@
 # Usage: push this repo to GitHub, then in Render choose
 # "New +" -> "Blueprint" and point it at the repo.
 #
-# Before the first deploy, switch prisma/schema.prisma to
-#   provider = "postgresql"
-# so `prisma migrate deploy` targets Postgres.
+# No manual schema edits are needed. `build:prod` generates the Prisma client
+# from the committed prisma/postgres/schema.prisma (PostgreSQL) and
+# `db:deploy` applies prisma/postgres/migrations. The SQLite schema used for
+# local dev is untouched. See server/scripts/sync-postgres-schema.mjs.
 
 databases:
   - name: crypto-advisor-db
@@ -19,7 +20,7 @@ services:
     runtime: node
     plan: free
     rootDir: server
-    buildCommand: npm install && npm run build && npx prisma migrate deploy
+    buildCommand: npm install && npm run build:prod && npm run db:deploy
     startCommand: npm run start
     healthCheckPath: /api/health
     envVars:

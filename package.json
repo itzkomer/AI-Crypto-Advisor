@@ -16,10 +16,13 @@
     "start": "npm run start -w server",
     "setup": "npm install && npm run db:push -w server && npm run db:seed -w server",
     "db:push": "npm run db:push -w server",
-    "db:migrate": "npm run db:migrate -w server",
     "db:seed": "npm run db:seed -w server",
     "db:studio": "npm run db:studio -w server",
+    "db:deploy": "npm run db:deploy -w server",
+    "schema:sync": "npm run schema:sync -w server",
+    "schema:check": "npm run schema:check -w server",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
+    "verify": "npm run schema:check && npm run typecheck && npm run build",
     "lint": "npm run typecheck"
   },
   "devDependencies": {
