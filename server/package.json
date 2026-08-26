@@ -14,24 +14,20 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-
     "//": "--- local dev: SQLite, prisma/schema.prisma ---",
     "build": "prisma generate && tsc -p tsconfig.json",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
-
     "//prod": "--- production: PostgreSQL, prisma/postgres/schema.prisma ---",
     "build:prod": "npm run schema:check && prisma generate --schema=prisma/postgres/schema.prisma && tsc -p tsconfig.json",
     "db:deploy": "prisma migrate deploy --schema=prisma/postgres/schema.prisma",
     "db:studio:prod": "prisma studio --schema=prisma/postgres/schema.prisma",
-
     "//schema": "--- keep the generated Postgres schema in sync ---",
     "schema:sync": "node scripts/sync-postgres-schema.mjs",
     "schema:check": "node scripts/sync-postgres-schema.mjs --check",
     "schema:migration": "prisma migrate diff --from-empty --to-schema-datamodel prisma/postgres/schema.prisma --script > prisma/postgres/migrations/0_init/migration.sql",
-
     "postinstall": "prisma generate"
   },
   "dependencies": {

@@ -21,6 +21,22 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
 
+    /**
+     * Load-bearing in this monorepo - do not remove.
+     *
+     * npm workspaces hoist packages to the ROOT node_modules, so the client's
+     * @types/react, @types/react-dom and vite/client all end up visible to this
+     * project. Without an explicit allowlist, tsc auto-includes every package in
+     * node_modules/@types, which leaks DOM globals (document, window, HTMLElement)
+     * into server code - so a genuine mistake like using `localStorage` in a
+     * service would type-check clean and only fail at runtime.
+     *
+     * Note: if you see `TS2688: Cannot find type definition file for 'node'`,
+     * this line is NOT the bug - it is the messenger. It means @types/node was
+     * not installed, which on a host that sets NODE_ENV=production happens
+     * because `npm install` omits devDependencies. Install with
+     * `npm ci --include=dev` (see render.yaml) rather than deleting this.
+     */
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
