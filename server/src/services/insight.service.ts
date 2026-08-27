@@ -19,7 +19,7 @@ const MAX_SENTENCES = 3;
 /* ------------------------------------------------------------------ */
 
 const SYSTEM_PROMPT =
-  'You are a crypto market analyst. Write a direct 2-3 sentence market summary for a dashboard. Do not restate these instructions. Do not include analysis steps or outlines. Provide only the final prose.';
+  'You are a crypto market analyst. Return ONLY the final 2-3 sentence dashboard insight paragraph. Never output thoughts, planning steps, outlines, "Sentence 1", or labels. Output only raw prose.';
 
 const formatPrice = (coin: CoinPrice): string => {
   const price = coin.priceUsd < 1 ? coin.priceUsd.toFixed(4) : coin.priceUsd.toLocaleString('en-US');
@@ -45,7 +45,7 @@ export const buildUserPrompt = (context: InsightContext): string => {
   const headlineText = headlines.length > 0 ? headlines.map(formatHeadline).join('\n') : 'No recent headlines';
 
   return `Today is ${dateKey}.
-The reader is a ${archetype.label} (${archetype.promptHint}) tracking: ${profile.assets.join(', ')}. Preferred tone: ${tone || 'informative'}.
+Reader: ${archetype.label} (${archetype.promptHint}) tracking: ${profile.assets.join(', ')}. Preferred tone: ${tone || 'informative'}.
 
 Market Data:
 ${priceText}
@@ -53,7 +53,8 @@ ${priceText}
 Headlines:
 ${headlineText}
 
-Write 2 to 3 sentences summarizing what today's data means for this reader. Include at least one exact number from the Market Data. Start directly with the summary.`;
+TASK: Write a 2 to 3 sentence natural summary for the reader using the market data.
+CRITICAL: Do NOT write any introduction, numbered steps, planning, or "Sentence 1:". Output ONLY the final paragraph.`;
 };
 
 /* ------------------------------------------------------------------ */
@@ -68,18 +69,29 @@ export const sanitizeCompletion = (raw: string): string => {
     .replace(/```[\s\S]*?```/g, ' ')
     .trim();
 
-  // If a thinking/reasoning breakdown was generated, capture everything after the marker
-  const markers = [
-    /(?:Here(?:'s| is) (?:a |the )?(?:draft|response|insight|final summary|summary)[^:]*:)/i,
+  // 1. If CoT leaked "Sentence 1: ... Sentence 2: ...", extract the sentences directly
+  if (/Sentence \d+:/i.test(text)) {
+    const sentenceMatches = text.match(/Sentence \d+:\s*([^.\n]+[.!?])/gi);
+    if (sentenceMatches && sentenceMatches.length > 0) {
+      text = sentenceMatches
+        .map((s) => s.replace(/Sentence \d+:\s*/i, '').trim())
+        .join(' ');
+    }
+  }
+
+  // 2. Fallback split markers for other common CoT headers
+  const splitMarkers = [
     /\*\*Response:?\*\*/i,
     /\*\*Summary:?\*\*/i,
-    /2\.\s*\*\*Draft (?:the )?Response:?\*\*/i,
+    /\*\*Final (?:Insight|Summary|Response):?\*\*/i,
+    /(?:Here(?:'s| is) (?:a |the )?(?:draft|response|insight|final summary|summary)[^:]*:)/i,
+    /\d+\.\s*(?:Drafting|Draft|Generate|Synthesize)[^:]*:\s*/i,
   ];
 
-  for (const marker of markers) {
-    const match = text.split(marker);
-    if (match.length > 1) {
-      const candidate = match[match.length - 1]?.trim();
+  for (const marker of splitMarkers) {
+    const parts = text.split(marker);
+    if (parts.length > 1) {
+      const candidate = parts[parts.length - 1]?.trim();
       if (candidate && candidate.length > 20) {
         text = candidate;
         break;
@@ -87,7 +99,7 @@ export const sanitizeCompletion = (raw: string): string => {
     }
   }
 
-  // Filter out meta-instruction lines
+  // 3. Filter out leftover meta labels and list headers
   const lines = text
     .split('\n')
     .map((l) => l.trim())
@@ -96,16 +108,19 @@ export const sanitizeCompletion = (raw: string): string => {
         Boolean(l) &&
         !/^here['’]s a thinking process/i.test(l) &&
         !/^\d+\.\s*\*\*Analyze/i.test(l) &&
+        !/^\d+\.\s+Drafting/i.test(l) &&
         !/^\*{1,2}(?:Role|Format|Constraints|Grounding|Tone|Audience|Input Data|Task):?\*{1,2}/i.test(l) &&
         !/^[-*•]\s*\*{1,2}(?:Role|Format|Constraints|Grounding|Tone|Audience|Task):?\*{1,2}/i.test(l),
     );
 
   text = lines.join(' ');
 
+  // 4. Strip leftover markdown artifacts
   text = text
     .replace(/^\s*(?:sure|certainly|here(?:'s| is)[^:]*):\s*/i, '')
     .replace(/[*_#>`]/g, '')
     .replace(/^\s*[-•]\s*/gm, '')
+    .replace(/Sentence \d+:\s*/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -149,7 +164,7 @@ const callOpenRouter = async (userPrompt: string): Promise<string> => {
       },
       body: {
         model: env.OPENROUTER_MODEL,
-        temperature: 0.3,
+        temperature: 0.2,
         max_tokens: 1000,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
