@@ -1,4 +1,3 @@
-cat << 'EOF' > server/src/lib/httpClient.ts
 /**
  * Thin wrapper over global fetch (Node >= 18) adding timeouts, one retry on
  * transient failures, and typed error mapping to `UpstreamError`.
@@ -102,4 +101,3 @@ export const fetchJson = async <T>(url: string, options: FetchJsonOptions): Prom
 
   throw lastError;
 };
-EOF
