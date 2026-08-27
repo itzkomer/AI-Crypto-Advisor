@@ -1,16 +1,5 @@
 /**
  * Daily AI Insight.
- *
- * Pipeline:
- *   1. Gather grounding context (profile + live prices + top headlines).
- *   2. Build a tightly-scoped prompt (2-3 sentences, no financial advice).
- *   3. Try OpenRouter -> Hugging Face -> deterministic template.
- *   4. Persist as a `DailyInsight` row keyed by (userId, UTC date) so the
- *      insight is stable for the day and has a durable id for feedback rows.
- *
- * The prompt is stored alongside the completion because a (prompt, completion,
- * vote) triple is exactly the record a preference dataset needs later - see the
- * README's continuous-learning section.
  */
 import { env } from '../config/env';
 import { fetchJson } from '../lib/httpClient';
@@ -29,15 +18,8 @@ const MAX_SENTENCES = 3;
 /* Prompt construction                                                 */
 /* ------------------------------------------------------------------ */
 
-const SYSTEM_PROMPT = [
-  '/no_think',
-  'You are a concise crypto market analyst writing a direct dashboard update for an investor.',
-  'Write exactly 2 to 3 sentences of natural prose summarizing what today’s data means for the reader.',
-  'Do NOT include analysis steps, thinking, numbered lists, markdown, headings, bullet points, or emojis.',
-  'Do NOT restate the instructions or write "1. Analyze the Request". Start immediately with the summary.',
-  'Ground every claim strictly in the provided DATA block. Never invent numbers or events.',
-  'Address the reader directly as "you". Never give direct financial advice or tell the reader to buy or sell.',
-].join(' ');
+const SYSTEM_PROMPT =
+  'You are a crypto market analyst. Write a direct 2-3 sentence market summary for a dashboard. Do not restate these instructions. Do not include analysis steps or outlines. Provide only the final prose.';
 
 const formatPrice = (coin: CoinPrice): string => {
   const price = coin.priceUsd < 1 ? coin.priceUsd.toFixed(4) : coin.priceUsd.toLocaleString('en-US');
@@ -59,73 +41,79 @@ export const buildUserPrompt = (context: InsightContext): string => {
   const archetype = ARCHETYPE_META[profile.archetype];
   const tone = profile.contentTypes.map((type) => CONTENT_TYPE_META[type].promptHint).join(', ');
 
-  return [
-    `DATE (UTC): ${dateKey}`,
-    '',
-    'READER PROFILE',
-    `- Investor type: ${archetype.label} - ${archetype.promptHint}.`,
-    `- Tracked assets: ${profile.assets.join(', ')}.`,
-    `- Prefers: ${tone || 'headline-driven market context'}.`,
-    profile.goal ? `- Stated goal: ${profile.goal}` : null,
-    '',
-    'DATA - PRICES',
-    coins.length > 0 ? coins.map(formatPrice).join('; ') : '- unavailable',
-    '',
-    'DATA - HEADLINES',
-    headlines.length > 0 ? headlines.map(formatHeadline).join('\n') : '- unavailable',
-    '',
-    `TASK: Output only 2-3 sentences of direct prose summarizing market conditions for this reader. Reference at least one concrete number from DATA - PRICES. Start directly with the summary.`,
-  ]
-    .filter((line): line is string => line !== null)
-    .join('\n');
+  const priceText = coins.length > 0 ? coins.map(formatPrice).join('; ') : 'No price data available';
+  const headlineText = headlines.length > 0 ? headlines.map(formatHeadline).join('\n') : 'No recent headlines';
+
+  return `Today is ${dateKey}.
+The reader is a ${archetype.label} (${archetype.promptHint}) tracking: ${profile.assets.join(', ')}. Preferred tone: ${tone || 'informative'}.
+
+Market Data:
+${priceText}
+
+Headlines:
+${headlineText}
+
+Write 2 to 3 sentences summarizing what today's data means for this reader. Include at least one exact number from the Market Data. Start directly with the summary.`;
 };
 
 /* ------------------------------------------------------------------ */
 /* Post-processing                                                     */
 /* ------------------------------------------------------------------ */
 
-/**
- * Strips reasoning traces, markdown artifacts, analysis rubrics, and caps length.
- */
 export const sanitizeCompletion = (raw: string): string => {
   if (!raw) return '';
 
-  let cleaned = raw
+  let text = raw
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/```[\s\S]*?```/g, ' ')
     .trim();
 
-  if (/1\.\s*Analyze/i.test(cleaned) || /^(?:Role|Format|Constraints|Grounding):/im.test(cleaned)) {
-    const paragraphs = cleaned
-      .split(/\n\s*\n/)
-      .map((p) => p.trim())
-      .filter(
-        (p) =>
-          Boolean(p) &&
-          !/1\.\s*Analyze/i.test(p) &&
-          !/^(?:Role|Format|Constraints|Grounding|Tone|Audience):/im.test(p) &&
-          !/^\d+\.\s*(?:Draft|Generate|Synthesize)/i.test(p),
-      );
+  // If a thinking/reasoning breakdown was generated, capture everything after the marker
+  const markers = [
+    /(?:Here(?:'s| is) (?:a |the )?(?:draft|response|insight|final summary|summary)[^:]*:)/i,
+    /\*\*Response:?\*\*/i,
+    /\*\*Summary:?\*\*/i,
+    /2\.\s*\*\*Draft (?:the )?Response:?\*\*/i,
+  ];
 
-    const lastParagraph = paragraphs[paragraphs.length - 1];
-    if (typeof lastParagraph === 'string' && lastParagraph.length > 0) {
-      cleaned = lastParagraph;
+  for (const marker of markers) {
+    const match = text.split(marker);
+    if (match.length > 1) {
+      const candidate = match[match.length - 1]?.trim();
+      if (candidate && candidate.length > 20) {
+        text = candidate;
+        break;
+      }
     }
   }
 
-  cleaned = cleaned
+  // Filter out meta-instruction lines
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(
+      (l) =>
+        Boolean(l) &&
+        !/^here['’]s a thinking process/i.test(l) &&
+        !/^\d+\.\s*\*\*Analyze/i.test(l) &&
+        !/^\*{1,2}(?:Role|Format|Constraints|Grounding|Tone|Audience|Input Data|Task):?\*{1,2}/i.test(l) &&
+        !/^[-*•]\s*\*{1,2}(?:Role|Format|Constraints|Grounding|Tone|Audience|Task):?\*{1,2}/i.test(l),
+    );
+
+  text = lines.join(' ');
+
+  text = text
     .replace(/^\s*(?:sure|certainly|here(?:'s| is)[^:]*):\s*/i, '')
     .replace(/[*_#>`]/g, '')
     .replace(/^\s*[-•]\s*/gm, '')
-    .replace(/^\d+\.\s+[^.\n]+:\s*/gm, '')
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (!cleaned) return '';
+  if (!text) return '';
 
-  const sentences = cleaned.match(/[^.!?]+[.!?]+/g);
+  const sentences = text.match(/[^.!?]+[.!?]+/g);
   if (!sentences || sentences.length === 0) {
-    return cleaned.length > 420 ? `${cleaned.slice(0, 417).trimEnd()}...` : cleaned;
+    return text.length > 420 ? `${text.slice(0, 417).trimEnd()}...` : text;
   }
 
   return sentences
@@ -162,7 +150,7 @@ const callOpenRouter = async (userPrompt: string): Promise<string> => {
       body: {
         model: env.OPENROUTER_MODEL,
         temperature: 0.3,
-        max_tokens: 400,
+        max_tokens: 1000,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userPrompt },
@@ -210,9 +198,6 @@ const callHuggingFace = async (userPrompt: string): Promise<string> => {
   return content;
 };
 
-/**
- * Deterministic, data-grounded summary used when no LLM is reachable.
- */
 export const templateInsight = (context: InsightContext): string => {
   const { profile, coins } = context;
   const archetype = ARCHETYPE_META[profile.archetype];
@@ -246,10 +231,6 @@ export const templateInsight = (context: InsightContext): string => {
     focus[profile.archetype],
   ].join(' ');
 };
-
-/* ------------------------------------------------------------------ */
-/* Orchestration                                                       */
-/* ------------------------------------------------------------------ */
 
 interface GenerationResult {
   content: string;
@@ -298,7 +279,6 @@ const buildBasedOn = (context: InsightContext): string[] => {
 };
 
 export interface GetInsightOptions {
-  /** Ignore today's stored insight and generate a fresh one. */
   force?: boolean;
 }
 
