@@ -30,11 +30,13 @@ const MAX_SENTENCES = 3;
 /* ------------------------------------------------------------------ */
 
 const SYSTEM_PROMPT = [
-  'You are a concise crypto market analyst inside a personal dashboard.',
-  'Write 2 to 3 sentences of plain prose. No lists, no headings, no markdown, no emojis.',
-  'Ground every claim in the DATA block you are given; never invent numbers or events.',
-  'Address the reader as "you". Be specific and useful, not generic hype.',
-  'Never give financial advice or tell the reader to buy or sell. Describe conditions and what to watch.',
+  '/no_think',
+  'You are a concise crypto market analyst writing a direct dashboard update for an investor.',
+  'Write exactly 2 to 3 sentences of natural prose summarizing what today’s data means for the reader.',
+  'Do NOT include analysis steps, thinking, numbered lists, markdown, headings, bullet points, or emojis.',
+  'Do NOT restate the instructions or write "1. Analyze the Request". Start immediately with the summary.',
+  'Ground every claim strictly in the provided DATA block. Never invent numbers or events.',
+  'Address the reader directly as "you". Never give direct financial advice or tell the reader to buy or sell.',
 ].join(' ');
 
 const formatPrice = (coin: CoinPrice): string => {
@@ -72,7 +74,7 @@ export const buildUserPrompt = (context: InsightContext): string => {
     'DATA - HEADLINES',
     headlines.length > 0 ? headlines.map(formatHeadline).join('\n') : '- unavailable',
     '',
-    `TASK: Write 2-3 sentences summarising what today's data means for this specific reader, in the tone their preferences imply. Reference at least one concrete number from DATA - PRICES.`,
+    `TASK: Output only 2-3 sentences of direct prose summarizing market conditions for this reader. Reference at least one concrete number from DATA - PRICES. Start directly with the summary.`,
   ]
     .filter((line): line is string => line !== null)
     .join('\n');
@@ -83,15 +85,39 @@ export const buildUserPrompt = (context: InsightContext): string => {
 /* ------------------------------------------------------------------ */
 
 /**
- * LLM output on free tiers is messy: markdown, preambles, runaway length.
- * Strip formatting and hard-cap to 3 sentences so the card never breaks layout.
+ * Strips reasoning traces, markdown artifacts, analysis rubrics, and caps length.
  */
 export const sanitizeCompletion = (raw: string): string => {
-  const cleaned = raw
+  if (!raw) return '';
+
+  // 1. Strip reasoning blocks and code blocks
+  let cleaned = raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/```[\s\S]*?```/g, ' ')
+    .trim();
+
+  // 2. If the model output a multi-step CoT scratchpad, isolate the final paragraph
+  if (/1\.\s*Analyze/i.test(cleaned) || /^(?:Role|Format|Constraints|Grounding):/im.test(cleaned)) {
+    const paragraphs = cleaned
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter(
+        (p) =>
+          p &&
+          !/1\.\s*Analyze/i.test(p) &&
+          !/^(?:Role|Format|Constraints|Grounding|Tone|Audience):/im.test(p) &&
+          !/^\d+\.\s*(?:Draft|Generate|Synthesize)/i.test(p),
+      );
+
+    cleaned = paragraphs.length > 0 ? paragraphs[paragraphs.length - 1] : cleaned;
+  }
+
+  // 3. Remove conversational preambles and residual markdown syntax
+  cleaned = cleaned
     .replace(/^\s*(?:sure|certainly|here(?:'s| is)[^:]*):\s*/i, '')
     .replace(/[*_#>`]/g, '')
     .replace(/^\s*[-•]\s*/gm, '')
+    .replace(/^\d+\.\s+[^.\n]+:\s*/gm, '')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -99,7 +125,6 @@ export const sanitizeCompletion = (raw: string): string => {
 
   const sentences = cleaned.match(/[^.!?]+[.!?]+/g);
   if (!sentences || sentences.length === 0) {
-    // No terminal punctuation - return a single trimmed sentence.
     return cleaned.length > 420 ? `${cleaned.slice(0, 417).trimEnd()}...` : cleaned;
   }
 
@@ -114,7 +139,12 @@ export const sanitizeCompletion = (raw: string): string => {
 /* ------------------------------------------------------------------ */
 
 interface OpenRouterResponse {
-  choices?: Array<{ message?: { content?: string | null } | null } | null>;
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+      reasoning?: string | null;
+    } | null;
+  } | null>;
 }
 
 const callOpenRouter = async (userPrompt: string): Promise<string> => {
@@ -132,17 +162,22 @@ const callOpenRouter = async (userPrompt: string): Promise<string> => {
       },
       body: {
         model: env.OPENROUTER_MODEL,
-        temperature: 0.6,
-        max_tokens: 220,
+        temperature: 0.3,
+        max_tokens: 400,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userPrompt },
         ],
+        reasoning: {
+          effort: 'none',
+          exclude: true,
+        },
       },
     },
   );
 
-  const content = response.choices?.[0]?.message?.content ?? '';
+  const message = response.choices?.[0]?.message;
+  const content = message?.content ?? '';
   if (!content.trim()) throw new Error('OpenRouter returned an empty completion.');
   return content;
 };
@@ -152,7 +187,6 @@ type HuggingFaceResponse = Array<{ generated_text?: string }> | { generated_text
 const callHuggingFace = async (userPrompt: string): Promise<string> => {
   if (!env.HUGGINGFACE_API_KEY) throw new Error('HUGGINGFACE_API_KEY is not configured.');
 
-  // Mistral instruct chat template.
   const prompt = `<s>[INST] ${SYSTEM_PROMPT}\n\n${userPrompt} [/INST]`;
 
   const response = await fetchJson<HuggingFaceResponse>(
@@ -164,8 +198,8 @@ const callHuggingFace = async (userPrompt: string): Promise<string> => {
       body: {
         inputs: prompt,
         parameters: {
-          max_new_tokens: 200,
-          temperature: 0.6,
+          max_new_tokens: 250,
+          temperature: 0.4,
           return_full_text: false,
         },
         options: { wait_for_model: true },
@@ -183,8 +217,6 @@ const callHuggingFace = async (userPrompt: string): Promise<string> => {
 
 /**
  * Deterministic, data-grounded summary used when no LLM is reachable.
- * Written to read like a real insight rather than an error message - it uses the
- * same numbers the model would have seen.
  */
 export const templateInsight = (context: InsightContext): string => {
   const { profile, coins } = context;
@@ -240,11 +272,15 @@ const generate = async (context: InsightContext): Promise<GenerationResult> => {
 
   for (const provider of providers) {
     try {
-      const sanitized = sanitizeCompletion(await provider.call());
+      const raw = await provider.call();
+      const sanitized = sanitizeCompletion(raw);
       if (sanitized) {
         return { content: sanitized, model: provider.model, prompt };
       }
-      logger.warn('Insight provider returned unusable text', { model: provider.model });
+      logger.warn('Insight provider returned unusable text after sanitize', {
+        model: provider.model,
+        raw,
+      });
     } catch (error) {
       logger.warn('Insight provider failed - trying next', {
         model: provider.model,
@@ -305,8 +341,6 @@ export const getInsightSection = async (
     }
   }
 
-  // Grounding context. Both sections already degrade gracefully on their own, so
-  // allSettled here is belt-and-braces against an unexpected throw.
   const [pricesResult, headlinesResult] = await Promise.allSettled([
     getPricesSection(profile.assets),
     getHeadlinesForPrompt(profile.assets),
