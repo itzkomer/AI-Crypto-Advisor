@@ -30,7 +30,7 @@ const MAX_SENTENCES = 3;
 /* ------------------------------------------------------------------ */
 
 const SYSTEM_PROMPT = [
-  '/no_think You are a concise crypto market analyst inside a personal dashboard.',
+  'You are a concise crypto market analyst inside a personal dashboard.',
   'Write 2 to 3 sentences of plain prose. No lists, no headings, no markdown, no emojis.',
   'Ground every claim in the DATA block you are given; never invent numbers or events.',
   'Address the reader as "you". Be specific and useful, not generic hype.',
